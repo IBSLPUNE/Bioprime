@@ -1,0 +1,18 @@
+include MANIFEST.in
+include requirements.txt
+include *.json
+include *.md
+include *.py
+include *.txt
+recursive-include bioprime *.css
+recursive-include bioprime *.csv
+recursive-include bioprime *.html
+recursive-include bioprime *.ico
+recursive-include bioprime *.js
+recursive-include bioprime *.json
+recursive-include bioprime *.md
+recursive-include bioprime *.png
+recursive-include bioprime *.py
+recursive-include bioprime *.svg
+recursive-include bioprime *.txt
+recursive-exclude bioprime *.pyc
