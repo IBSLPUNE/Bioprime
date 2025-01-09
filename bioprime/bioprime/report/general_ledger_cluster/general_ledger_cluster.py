@@ -155,7 +155,7 @@ def get_result(filters, account_details):
 
 	result = get_result_as_list(data, filters)
 
-	return result
+	return result        
 
 
 def get_gl_entries(filters, accounting_dimensions):
@@ -237,17 +237,6 @@ def get_conditions(filters):
     # Filter by Party
     if filters.get("party"):
         conditions.append("party in %(party)s")
-
-    # Add Territory Condition Based on User
-    user_territory = frappe.db.get_value(
-        'Sales Person', 
-        {'custom_user': frappe.session.user}, 
-        'custom_territory'
-    )
-    if user_territory:
-        conditions.append(f"`tabSales Invoice`.territory = '{user_territory}'")
-    else:
-        user_territory = 'default_territory'  # Fallback to default
 
     # Filter by Posting Date or Opening
     if not (
@@ -505,20 +494,50 @@ def get_account_type_map(company):
 
 
 def get_result_as_list(data, filters):
-	balance, balance_in_account_currency = 0, 0
-	inv_details = get_supplier_invoice_details()
+    balance, balance_in_account_currency = 0, 0
+    inv_details = get_supplier_invoice_details()  # Fetch supplier invoice details
 
-	for d in data:
-		if not d.get("posting_date"):
-			balance, balance_in_account_currency = 0, 0
+    # Fetch the user's territory from the Sales Person doctype
+    user_territory = frappe.db.get_value(
+        "Sales Person",
+        {"custom_user": frappe.session.user},  # Adjust field name if necessary
+        "custom_territory"  # Adjust field name if necessary
+    )
 
-		balance = get_balance(d, balance, "debit", "credit")
-		d["balance"] = balance
+    # Validate the presence of user_territory
+    if not user_territory:
+        frappe.throw(_("No territory is assigned to the logged-in user via Sales Person."))
 
-		d["account_currency"] = filters.account_currency
-		d["bill_no"] = inv_details.get(d.get("against_voucher"), "")
+    filtered_data = []
 
-	return data
+    for d in data:
+        if not d.get("posting_date"):
+            balance, balance_in_account_currency = 0, 0
+
+        # Calculate balance and update the record
+        balance = get_balance(d, balance, "debit", "credit")
+        d["balance"] = balance
+
+        # Update account currency and bill number
+        d["account_currency"] = filters.account_currency
+        d["bill_no"] = inv_details.get(d.get("against_voucher"), "")
+
+        # Fetch the territory using the against_voucher
+        if d.get("against_voucher"):
+            territory = frappe.db.get_value(
+                "Sales Invoice",  # Linked document
+                {"name": d.get("against_voucher"), "docstatus": 1},
+                "territory",  # Territory field in Sales Invoice
+            )
+            d["territory"] = territory
+
+        # Include only records matching the user's territory
+        if d.get("territory") == user_territory:
+            filtered_data.append(d)
+
+    return filtered_data
+
+
 
 
 def get_supplier_invoice_details():
