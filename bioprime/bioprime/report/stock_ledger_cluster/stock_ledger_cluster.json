@@ -1,0 +1,33 @@
+{
+ "add_total_row": 1,
+ "columns": [],
+ "creation": "2025-01-17 12:19:25.977039",
+ "disable_prepared_report": 0,
+ "disabled": 0,
+ "docstatus": 0,
+ "doctype": "Report",
+ "filters": [],
+ "idx": 0,
+ "is_standard": "Yes",
+ "letter_head": "BioPrime AgriSolutions Pvt Ltd",
+ "modified": "2025-01-17 12:19:25.977039",
+ "modified_by": "Administrator",
+ "module": "Bioprime",
+ "name": "Stock Ledger Cluster",
+ "owner": "Administrator",
+ "prepared_report": 0,
+ "ref_doctype": "Stock Ledger Entry",
+ "report_name": "Stock Ledger Cluster",
+ "report_type": "Script Report",
+ "roles": [
+  {
+   "role": "Accounts Manager"
+  },
+  {
+   "role": "Stock User"
+  },
+  {
+   "role": "Sales Partner"
+  }
+ ]
+}
