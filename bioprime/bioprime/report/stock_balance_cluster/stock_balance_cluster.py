@@ -38,30 +38,13 @@ SLEntry = Dict[str, Any]
 def execute(filters: Optional[StockBalanceFilter] = None):
 	return StockBalanceReport(filters).run()
 
-def get_territories():
-    """Fetch the territory associated with each warehouse via Sales Invoice and filter by user's territory."""
-    # Fetch the logged-in user's territory
-    user_territory = frappe.db.get_value('Sales Person', {'custom_user': frappe.session.user}, 'custom_territory')
 
-    # If user has a custom territory, use it; otherwise default to 'default_territory'
-    if user_territory:
-        territory_condition = frappe.qb.DocType("Sales Invoice").territory == user_territory
-    else:
-        user_territory = 'default_territory'
-        territory_condition = frappe.qb.DocType("Sales Invoice").territory == user_territory
-
-    sales_invoice = frappe.qb.DocType("Sales Invoice")
-
-    # Building the query with the condition
-    warehouse_territories = (
-        frappe.qb.from_(sales_invoice)
-        .select(sales_invoice.set_warehouse, sales_invoice.territory)
-        .where(sales_invoice.docstatus == 1)
-        .where(territory_condition)
-        .groupby(sales_invoice.set_warehouse)
-    ).run(as_dict=True)
-
-    return {entry["set_warehouse"]: entry["territory"] for entry in warehouse_territories}
+def get_warehouse_territories():
+    territories = (
+    frappe.qb.from_(warehouse)
+    .select(warehouse.custom_territory)
+    .where(warehouse.custom_territory.isnotnull())
+).run(as_dict=True)
 
 
 class StockBalanceReport(object):
@@ -117,13 +100,6 @@ class StockBalanceReport(object):
 	def prepare_new_data(self):
 		if not self.sle_entries:
 			return
-			
-		warehouse_territories = get_territories()  # Fetch territories
-		
-		user_territory = frappe.db.get_value('Sales Person', {'custom_user': frappe.session.user}, 'custom_territory')
-		if not user_territory:
-			frappe.throw(_("No territory assigned to the user."))
-		#return
 
 		if self.filters.get("show_stock_ageing_data"):
 			self.filters["show_warehouse_wise_stock"] = True
@@ -165,10 +141,6 @@ class StockBalanceReport(object):
 
 				report_data.update(stock_ageing_data)
 
-			report_data["territory"] = warehouse_territories.get(report_data["warehouse"], "unknown")
-			if report_data["territory"] != user_territory:
-				continue
-			
 			self.data.append(report_data)
 
 	def get_item_warehouse_map(self):
@@ -194,7 +166,7 @@ class StockBalanceReport(object):
 		)
 
 		return item_warehouse_map
-		
+
 	def prepare_item_warehouse_map(self, item_warehouse_map, entry, group_by_key):
 		qty_dict = item_warehouse_map[group_by_key]
 		for field in self.inventory_dimensions:
@@ -287,11 +259,14 @@ class StockBalanceReport(object):
 	def prepare_stock_ledger_entries(self):
 		sle = frappe.qb.DocType("Stock Ledger Entry")
 		item_table = frappe.qb.DocType("Item")
+		warehouse_table = frappe.qb.DocType("Warehouse")  # Include Warehouse table
 
 		query = (
 			frappe.qb.from_(sle)
 			.inner_join(item_table)
 			.on(sle.item_code == item_table.name)
+			.left_join(warehouse_table)
+			.on(sle.warehouse == warehouse_table.name)
 			.select(
 				sle.item_code,
 				sle.warehouse,
@@ -310,6 +285,7 @@ class StockBalanceReport(object):
 				item_table.item_group,
 				item_table.stock_uom,
 				item_table.item_name,
+				warehouse_table.custom_territory,
 			)
 			.where((sle.docstatus < 2) & (sle.is_cancelled == 0))
 			.orderby(CombineDatetime(sle.posting_date, sle.posting_time))
@@ -398,12 +374,12 @@ class StockBalanceReport(object):
 				"width": 100,
 			},
 			{
-            			"label": _("Territory"),
-           			"fieldname": "territory",
-            			"fieldtype": "Link",
-            			"options": "Territory",
-            			"width": 100,
-        		},
+				"label": _("Territory"),
+				"fieldname": "custom_territory",
+				"fieldtype": "Link",
+				"options": "Territory",
+				"width": 150,
+			},
 		]
 
 		for dimension in get_inventory_dimensions():
