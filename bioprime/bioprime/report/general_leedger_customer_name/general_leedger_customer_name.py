@@ -576,6 +576,7 @@ def get_columns(filters):
 		},
 		{"label": _("Against Account"), "fieldname": "against", "width": 120},
 		{"label": _("Party Type"), "fieldname": "party_type", "width": 100},
+		{"label": _("Party"), "fieldname": "party", "width": 100},
 		{"label": _("Party Name"), "fieldname": "party_name", "width": 100},
 		{"label": _("Project"), "options": "Project", "fieldname": "project", "width": 100},
 	]
