@@ -3,12 +3,12 @@
 
 
 from operator import itemgetter
-from typing import Any, Dict, List, Optional, TypedDict
+from typing import Any, TypedDict
 
 import frappe
 from frappe import _
 from frappe.query_builder import Order
-from frappe.query_builder.functions import Coalesce, CombineDatetime
+from frappe.query_builder.functions import Coalesce
 from frappe.utils import add_days, cint, date_diff, flt, getdate
 from frappe.utils.nestedset import get_descendants_of
 
@@ -20,35 +20,27 @@ from erpnext.stock.utils import add_additional_uom_columns
 
 
 class StockBalanceFilter(TypedDict):
-	company: Optional[str]
+	company: str | None
 	from_date: str
 	to_date: str
-	item_group: Optional[str]
-	item: Optional[str]
-	warehouse: Optional[str]
-	warehouse_type: Optional[str]
-	include_uom: Optional[str]  # include extra info in converted UOM
+	item_group: str | None
+	item: str | None
+	warehouse: str | None
+	warehouse_type: str | None
+	include_uom: str | None  # include extra info in converted UOM
 	show_stock_ageing_data: bool
 	show_variant_attributes: bool
 
 
-SLEntry = Dict[str, Any]
+SLEntry = dict[str, Any]
 
 
-def execute(filters: Optional[StockBalanceFilter] = None):
+def execute(filters: StockBalanceFilter | None = None):
 	return StockBalanceReport(filters).run()
 
 
-def get_warehouse_territories():
-    territories = (
-    frappe.qb.from_(warehouse)
-    .select(warehouse.custom_territory)
-    .where(warehouse.custom_territory.isnotnull())
-).run(as_dict=True)
-
-
-class StockBalanceReport(object):
-	def __init__(self, filters: Optional[StockBalanceFilter]) -> None:
+class StockBalanceReport:
+	def __init__(self, filters: StockBalanceFilter | None) -> None:
 		self.filters = filters
 		self.from_date = getdate(filters.get("from_date"))
 		self.to_date = getdate(filters.get("to_date"))
@@ -56,7 +48,7 @@ class StockBalanceReport(object):
 		self.start_from = None
 		self.data = []
 		self.columns = []
-		self.sle_entries: List[SLEntry] = []
+		self.sle_entries: list[SLEntry] = []
 		self.set_company_currency()
 
 	def set_company_currency(self) -> None:
@@ -77,6 +69,7 @@ class StockBalanceReport(object):
 			self.columns = self.get_columns()
 
 		self.add_additional_uom_columns()
+		#frappe.throw(str(self.data[0].custom_center))
 
 		return self.columns, self.data
 
@@ -98,8 +91,7 @@ class StockBalanceReport(object):
 				self.opening_data.setdefault(group_by_key, entry)
 
 	def prepare_new_data(self):
-		if not self.sle_entries:
-			return
+		self.item_warehouse_map = self.get_item_warehouse_map()
 
 		if self.filters.get("show_stock_ageing_data"):
 			self.filters["show_warehouse_wise_stock"] = True
@@ -107,13 +99,13 @@ class StockBalanceReport(object):
 
 		_func = itemgetter(1)
 
-		self.item_warehouse_map = self.get_item_warehouse_map()
+		del self.sle_entries
 
 		variant_values = {}
 		if self.filters.get("show_variant_attributes"):
 			variant_values = self.get_variant_values_for()
 
-		for key, report_data in self.item_warehouse_map.items():
+		for _key, report_data in self.item_warehouse_map.items():
 			if variant_data := variant_values.get(report_data.item_code):
 				report_data.update(variant_data)
 
@@ -147,15 +139,24 @@ class StockBalanceReport(object):
 		item_warehouse_map = {}
 		self.opening_vouchers = self.get_opening_vouchers()
 
-		for entry in self.sle_entries:
-			group_by_key = self.get_group_by_key(entry)
-			if group_by_key not in item_warehouse_map:
-				self.initialize_data(item_warehouse_map, group_by_key, entry)
+		if self.filters.get("show_stock_ageing_data"):
+			self.sle_entries = self.sle_query.run(as_dict=True)
 
-			self.prepare_item_warehouse_map(item_warehouse_map, entry, group_by_key)
+		# HACK: This is required to avoid causing db query in flt
+		_system_settings = frappe.get_cached_doc("System Settings")
+		with frappe.db.unbuffered_cursor():
+			if not self.filters.get("show_stock_ageing_data"):
+				self.sle_entries = self.sle_query.run(as_dict=True, as_iterator=True)
 
-			if self.opening_data.get(group_by_key):
-				del self.opening_data[group_by_key]
+			for entry in self.sle_entries:
+				group_by_key = self.get_group_by_key(entry)
+				if group_by_key not in item_warehouse_map:
+					self.initialize_data(item_warehouse_map, group_by_key, entry)
+
+				self.prepare_item_warehouse_map(item_warehouse_map, entry, group_by_key)
+
+				if self.opening_data.get(group_by_key):
+					del self.opening_data[group_by_key]
 
 		for group_by_key, entry in self.opening_data.items():
 			if group_by_key not in item_warehouse_map:
@@ -171,6 +172,7 @@ class StockBalanceReport(object):
 		qty_dict = item_warehouse_map[group_by_key]
 		for field in self.inventory_dimensions:
 			qty_dict[field] = entry.get(field)
+		#frappe.throw(str(qty_dict["custom_center"]))
 
 		if entry.voucher_type == "Stock Reconciliation" and (not entry.batch_no or entry.serial_no):
 			qty_diff = flt(entry.qty_after_transaction) - flt(qty_dict.bal_qty)
@@ -186,7 +188,6 @@ class StockBalanceReport(object):
 			qty_dict.opening_val += value_diff
 
 		elif entry.posting_date >= self.from_date and entry.posting_date <= self.to_date:
-
 			if flt(qty_diff, self.float_precision) >= 0:
 				qty_dict.in_qty += qty_diff
 				qty_dict.in_val += value_diff
@@ -205,6 +206,7 @@ class StockBalanceReport(object):
 			{
 				"item_code": entry.item_code,
 				"warehouse": entry.warehouse,
+				"custom_territory":entry.custom_territory,
 				"item_group": entry.item_group,
 				"company": entry.company,
 				"currency": self.company_currency,
@@ -222,17 +224,21 @@ class StockBalanceReport(object):
 				"val_rate": 0.0,
 			}
 		)
+		#frappe.throw(str(item_warehouse_map))
 
 	def get_group_by_key(self, row) -> tuple:
 		group_by_key = [row.company, row.item_code, row.warehouse]
 
 		for fieldname in self.inventory_dimensions:
-			if self.filters.get(fieldname):
+			if not row.get(fieldname):
+				continue
+
+			if self.filters.get(fieldname) or self.filters.get("show_dimension_wise_stock"):
 				group_by_key.append(row.get(fieldname))
 
 		return tuple(group_by_key)
 
-	def get_closing_balance(self) -> List[Dict[str, Any]]:
+	def get_closing_balance(self) -> list[dict[str, Any]]:
 		if self.filters.get("ignore_closing_balance"):
 			return []
 
@@ -244,7 +250,8 @@ class StockBalanceReport(object):
 			.where(
 				(table.docstatus == 1)
 				& (table.company == self.filters.company)
-				& ((table.to_date <= self.from_date))
+				& (table.to_date <= self.from_date)
+				& (table.status == "Completed")
 			)
 			.orderby(table.to_date, order=Order.desc)
 			.limit(1)
@@ -259,17 +266,18 @@ class StockBalanceReport(object):
 	def prepare_stock_ledger_entries(self):
 		sle = frappe.qb.DocType("Stock Ledger Entry")
 		item_table = frappe.qb.DocType("Item")
-		warehouse_table = frappe.qb.DocType("Warehouse")  # Include Warehouse table
+		ware=frappe.qb.DocType("Warehouse")
 
 		query = (
 			frappe.qb.from_(sle)
 			.inner_join(item_table)
 			.on(sle.item_code == item_table.name)
-			.left_join(warehouse_table)
-			.on(sle.warehouse == warehouse_table.name)
+			.left_join(ware)
+			.on(sle.warehouse == ware.name)
 			.select(
 				sle.item_code,
 				sle.warehouse,
+				ware.custom_territory,
 				sle.posting_date,
 				sle.actual_qty,
 				sle.valuation_rate,
@@ -285,10 +293,9 @@ class StockBalanceReport(object):
 				item_table.item_group,
 				item_table.stock_uom,
 				item_table.item_name,
-				warehouse_table.custom_territory,
 			)
 			.where((sle.docstatus < 2) & (sle.is_cancelled == 0))
-			.orderby(CombineDatetime(sle.posting_date, sle.posting_time))
+			.orderby(sle.posting_datetime)
 			.orderby(sle.creation)
 			.orderby(sle.actual_qty)
 		)
@@ -301,7 +308,7 @@ class StockBalanceReport(object):
 		if self.filters.get("company"):
 			query = query.where(sle.company == self.filters.get("company"))
 
-		self.sle_entries = query.run(as_dict=True)
+		self.sle_query = query
 
 	def apply_inventory_dimensions_filters(self, query, sle) -> str:
 		inventory_dimension_fields = self.get_inventory_dimension_fields()
@@ -330,13 +337,15 @@ class StockBalanceReport(object):
 	def apply_items_filters(self, query, item_table) -> str:
 		if item_group := self.filters.get("item_group"):
 			children = get_descendants_of("Item Group", item_group, ignore_permissions=True)
-			query = query.where(item_table.item_group.isin(children + [item_group]))
+			query = query.where(item_table.item_group.isin([*children, item_group]))
 
 		for field in ["item_code", "brand"]:
 			if not self.filters.get(field):
 				continue
-
-			query = query.where(item_table[field] == self.filters.get(field))
+			elif field == "item_code":
+				query = query.where(item_table.name == self.filters.get(field))
+			else:
+				query = query.where(item_table[field] == self.filters.get(field))
 
 		return query
 
@@ -378,7 +387,7 @@ class StockBalanceReport(object):
 				"fieldname": "custom_territory",
 				"fieldtype": "Link",
 				"options": "Territory",
-				"width": 150,
+				"width": 100,
 			},
 		]
 
@@ -414,7 +423,7 @@ class StockBalanceReport(object):
 					"fieldname": "bal_val",
 					"fieldtype": "Currency",
 					"width": 100,
-					"options": "currency",
+					"options": "Company:company:default_currency",
 				},
 				{
 					"label": _("Opening Qty"),
@@ -428,7 +437,7 @@ class StockBalanceReport(object):
 					"fieldname": "opening_val",
 					"fieldtype": "Currency",
 					"width": 110,
-					"options": "currency",
+					"options": "Company:company:default_currency",
 				},
 				{
 					"label": _("In Qty"),
@@ -449,10 +458,12 @@ class StockBalanceReport(object):
 				{
 					"label": _("Valuation Rate"),
 					"fieldname": "val_rate",
-					"fieldtype": "Currency",
+					"fieldtype": self.filters.valuation_field_type or "Currency",
 					"width": 90,
 					"convertible": "rate",
-					"options": "currency",
+					"options": "Company:company:default_currency"
+					if self.filters.valuation_field_type == "Currency"
+					else None,
 				},
 				{
 					"label": _("Company"),
@@ -550,7 +561,9 @@ class StockBalanceReport(object):
 					frappe.qb.from_(sr)
 					.select(sr.name, Coalesce("Stock Reconciliation").as_("voucher_type"))
 					.where(
-						(sr.docstatus == 1) & (sr.posting_date <= self.to_date) & (sr.purpose == "Opening Stock")
+						(sr.docstatus == 1)
+						& (sr.posting_date <= self.to_date)
+						& (sr.purpose == "Opening Stock")
 					)
 				)
 			).select("voucher_type", "name")
@@ -576,7 +589,7 @@ class StockBalanceReport(object):
 
 
 def filter_items_with_no_transactions(
-	iwb_map, float_precision: float, inventory_dimensions: list = None
+	iwb_map, float_precision: float, inventory_dimensions: list | None = None
 ):
 	pop_keys = []
 	for group_by_key in iwb_map:
@@ -591,6 +604,7 @@ def filter_items_with_no_transactions(
 				"item_code",
 				"warehouse",
 				"item_name",
+				"custom_territory",
 				"item_group",
 				"project",
 				"stock_uom",
@@ -613,6 +627,6 @@ def filter_items_with_no_transactions(
 	return iwb_map
 
 
-def get_variants_attributes() -> List[str]:
+def get_variants_attributes() -> list[str]:
 	"""Return all item variant attributes."""
 	return frappe.get_all("Item Attribute", pluck="name")
