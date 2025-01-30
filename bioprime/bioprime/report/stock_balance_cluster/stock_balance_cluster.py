@@ -35,7 +35,7 @@ class StockBalanceFilter(TypedDict):
 SLEntry = dict[str, Any]
 
 
-def execute(filters: StockBalanceFilter | None = None):
+def execute(filters: StockBalanceFilter | None = None):	
 	return StockBalanceReport(filters).run()
 
 
@@ -267,6 +267,8 @@ class StockBalanceReport:
 		sle = frappe.qb.DocType("Stock Ledger Entry")
 		item_table = frappe.qb.DocType("Item")
 		ware=frappe.qb.DocType("Warehouse")
+		sales_person = frappe.qb.DocType("Sales Person")
+		user_territory = frappe.db.get_value("custom_user", frappe.session.user, "custom_territory")
 
 		query = (
 			frappe.qb.from_(sle)
@@ -274,6 +276,8 @@ class StockBalanceReport:
 			.on(sle.item_code == item_table.name)
 			.left_join(ware)
 			.on(sle.warehouse == ware.name)
+			.left_join(sales_person)
+			.on(ware.custom_territory == sales_person.custom_territory)
 			.select(
 				sle.item_code,
 				sle.warehouse,
