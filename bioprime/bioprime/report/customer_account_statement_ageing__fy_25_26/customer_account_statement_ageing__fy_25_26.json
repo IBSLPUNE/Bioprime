@@ -1,5 +1,5 @@
 {
- "add_total_row": 1,
+ "add_total_row": 0,
  "columns": [],
  "creation": "2025-11-13 12:38:34.145617",
  "disable_prepared_report": 0,
@@ -10,7 +10,7 @@
  "idx": 0,
  "is_standard": "Yes",
  "letter_head": "BioPrime AgriSolutions Pvt Ltd",
- "modified": "2025-11-13 12:38:36.361468",
+ "modified": "2025-11-15 15:40:02.780965",
  "modified_by": "Administrator",
  "module": "Bioprime",
  "name": "Customer account statement ageing -FY 25-26",
