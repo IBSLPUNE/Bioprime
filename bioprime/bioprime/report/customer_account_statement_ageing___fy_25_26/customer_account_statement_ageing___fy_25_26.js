@@ -2,7 +2,7 @@
 // For license information, please see license.txt
 /* eslint-disable */
 
-frappe.query_reports["Customer account statement ageing -FY 25-26"] = {
+frappe.query_reports["Customer account statement ageing - FY 25-26"] = {
 	filters: [
 		{
 			fieldname: "company",
