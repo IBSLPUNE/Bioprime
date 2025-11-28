@@ -677,37 +677,34 @@ def get_columns(filters):
             "fieldtype": "Currency",
             "options": "presentation_currency",
             "width": 130,
-        },
-        # Renamed 'Territory' to 'Cluster'
-        {"label": _("Cluster"), "fieldname": "cluster", "fieldtype": "Data", "width": 150},
-        {"label": _("Against Income Account"), "fieldname": "against", "width": 180},
+        }
     ]
 
-    # 2. Aging Bucket Columns (These will be appended last)
+    # 2. Aging Bucket Columns (MODIFIED)
     aging_columns = [
         {
-            "label": _("0 - 30"),
+            "label": _("0 - 90"), # MODIFIED: Previously "0 - 30"
             "fieldname": "age_0_30",
             "fieldtype": "Currency",
             "options": "presentation_currency",
             "width": 100,
         },
         {
-            "label": _("31 - 60"),
+            "label": _("91 - 120"), # MODIFIED: Previously "31 - 60"
             "fieldname": "age_31_60",
             "fieldtype": "Currency",
             "options": "presentation_currency",
             "width": 100,
         },
         {
-            "label": _("61 - 90"),
+            "label": _("121 - 180"), # MODIFIED: Previously "61 - 90"
             "fieldname": "age_61_90",
             "fieldtype": "Currency",
             "options": "presentation_currency",
             "width": 100,
         },
         {
-            "label": _("Over 90"),
+            "label": _("Over 180"), # MODIFIED: Previously "Over 90"
             "fieldname": "age_over_90",
             "fieldtype": "Currency",
             "options": "presentation_currency",
@@ -717,10 +714,6 @@ def get_columns(filters):
     
     # 3. Append Aging Columns to the end
     columns.extend(aging_columns)
-
-    # All other original conditional columns (dimensions, remarks, etc.) are removed as requested.
-    # The original function contained logic for 'Account' and 'Cost Center', but they are removed
-    # to strictly adhere to the columns in the image and your list.
     
     return columns
 
@@ -734,10 +727,8 @@ def is_receivable_account(account_name):
 def get_aged_ar_data(report_date):
 	"""
 	Calculates the outstanding aging buckets for all active Sales Invoices as of report_date.
-	
-	NOTE: This is a SIMPLIFIED implementation. For a complex production system,
-	you would need the full, robust logic from the standard Accounts Receivable Aging report
-	which correctly handles multiple payments, allocations, write-offs, etc.
+    
+    MODIFIED to use 0-90, 91-120, 121-180, and Over 180 days buckets.
 	"""
 	
 	invoices = frappe.db.sql("""
@@ -757,6 +748,7 @@ def get_aged_ar_data(report_date):
 	report_date = getdate(report_date)
 	
 	for inv in invoices:
+		# Calculate days past due date (Negative means not yet due)
 		days = (report_date - getdate(inv['due_date'])).days
 		outstanding = inv['outstanding_amount']
 		
@@ -765,14 +757,14 @@ def get_aged_ar_data(report_date):
 			"bucket_3": 0.0, "bucket_4": 0.0
 		}
 		
-		if days <= 30:
-			bucket_info["bucket_1"] = outstanding # 0 - 30 days
-		elif days <= 60:
-			bucket_info["bucket_2"] = outstanding # 31 - 60 days
-		elif days <= 90:
-			bucket_info["bucket_3"] = outstanding # 61 - 90 days
-		else:
-			bucket_info["bucket_4"] = outstanding # > 90 days
+		if days <= 90: # 0 - 90 days
+			bucket_info["bucket_1"] = outstanding 
+		elif days <= 120: # 91 - 120 days
+			bucket_info["bucket_2"] = outstanding 
+		elif days <= 180: # 121 - 180 days
+			bucket_info["bucket_3"] = outstanding 
+		else: # Over 180 days
+			bucket_info["bucket_4"] = outstanding 
 
 		aging_buckets[inv['name']] = bucket_info
 		
