@@ -205,6 +205,9 @@ def get_gl_entries(filters, accounting_dimensions):
 	dimension_fields = ""
 	if accounting_dimensions:
 		dimension_fields = ", ".join(accounting_dimensions) + ","
+	
+	# Get the full set of conditions, including the filter for Journal Entry
+	conditions = get_conditions(filters)
 
 	gl_entries = frappe.db.sql(
 		f"""
@@ -215,7 +218,7 @@ def get_gl_entries(filters, accounting_dimensions):
 			against_voucher_type, against_voucher, account_currency,
 			against, is_opening, creation {select_fields}
 		from `tabGL Entry`
-		where company=%(company)s {get_conditions(filters)}
+		where company=%(company)s {conditions}
 		{order_by_statement}
 	""",
 		filters,
@@ -230,6 +233,11 @@ def get_gl_entries(filters, accounting_dimensions):
 
 def get_conditions(filters):
 	conditions = []
+	
+	# --- MODIFICATION: Exclude Journal Entry from all results ---
+	# This filter is explicitly added to the conditions list.
+	conditions.append("voucher_type != 'Journal Entry'")
+	# --- MODIFICATION END ---
 
 	ignore_is_opening = frappe.db.get_single_value(
 		"Accounts Settings", "ignore_is_opening_check_for_reporting"
@@ -425,24 +433,24 @@ def get_data_with_opening_closing(filters, account_details, accounting_dimension
 	return data
 
 def get_totals_dict():
-    def _get_debit_credit_dict(label):
-        return _dict({
-            "account": f"'{label}'",
-            "debit": 0.0,
-            "credit": 0.0,
-            "debit_in_account_currency": 0.0,
-            "credit_in_account_currency": 0.0,
-            "age_0_30": 0.0,
-            "age_31_60": 0.0,
-            "age_61_90": 0.0,
-            "age_over_90": 0.0,
-        })
+	def _get_debit_credit_dict(label):
+		return _dict({
+			"account": f"'{label}'",
+			"debit": 0.0,
+			"credit": 0.0,
+			"debit_in_account_currency": 0.0,
+			"credit_in_account_currency": 0.0,
+			"age_0_30": 0.0,
+			"age_31_60": 0.0,
+			"age_61_90": 0.0,
+			"age_over_90": 0.0,
+		})
 
-    return _dict({
-        "opening": _get_debit_credit_dict(TRANSLATIONS.OPENING),
-        "total": _get_debit_credit_dict(TRANSLATIONS.TOTAL),
-        "closing": _get_debit_credit_dict(TRANSLATIONS.CLOSING_TOTAL),
-    })
+	return _dict({
+		"opening": _get_debit_credit_dict(TRANSLATIONS.OPENING),
+		"total": _get_debit_credit_dict(TRANSLATIONS.TOTAL),
+		"closing": _get_debit_credit_dict(TRANSLATIONS.CLOSING_TOTAL),
+	})
 
 	
 def group_by_field(group_by):
@@ -640,82 +648,82 @@ def get_balance(row, balance, debit_field, credit_field):
 
 
 def get_columns(filters):
-    if filters.get("presentation_currency"):
-        currency = filters["presentation_currency"]
-    else:
-        company = filters.get("company") or get_default_company()
-        filters["presentation_currency"] = currency = get_company_currency(company)
+	if filters.get("presentation_currency"):
+		currency = filters["presentation_currency"]
+	else:
+		company = filters.get("company") or get_default_company()
+		filters["presentation_currency"] = currency = get_company_currency(company)
 
-    # 1. Standard Columns (No Aging)
-    columns = [
-        {"label": _("Posting Date"), "fieldname": "posting_date", "fieldtype": "Date", "width": 100},
-        {"label": _("Voucher Type"), "fieldname": "voucher_type", "width": 120},
-        {
-            "label": _("Voucher No"),
-            "fieldname": "voucher_no",
-            "fieldtype": "Dynamic Link",
-            "options": "voucher_type",
-            "width": 180,
-        },
-        {
-            "label": _("Debit ({0})").format(currency),
-            "fieldname": "debit",
-            "fieldtype": "Currency",
-            "options": "presentation_currency",
-            "width": 130,
-        },
-        {
-            "label": _("Credit ({0})").format(currency),
-            "fieldname": "credit",
-            "fieldtype": "Currency",
-            "options": "presentation_currency",
-            "width": 130,
-        },
-        {
-            "label": _("Balance ({0})").format(currency),
-            "fieldname": "balance",
-            "fieldtype": "Currency",
-            "options": "presentation_currency",
-            "width": 130,
-        }
-    ]
+	# 1. Standard Columns (No Aging)
+	columns = [
+		{"label": _("Posting Date"), "fieldname": "posting_date", "fieldtype": "Date", "width": 100},
+		{"label": _("Voucher Type"), "fieldname": "voucher_type", "width": 120},
+		{
+			"label": _("Voucher No"),
+			"fieldname": "voucher_no",
+			"fieldtype": "Dynamic Link",
+			"options": "voucher_type",
+			"width": 180,
+		},
+		{
+			"label": _("Debit ({0})").format(currency),
+			"fieldname": "debit",
+			"fieldtype": "Currency",
+			"options": "presentation_currency",
+			"width": 130,
+		},
+		{
+			"label": _("Credit ({0})").format(currency),
+			"fieldname": "credit",
+			"fieldtype": "Currency",
+			"options": "presentation_currency",
+			"width": 130,
+		},
+		{
+			"label": _("Balance ({0})").format(currency),
+			"fieldname": "balance",
+			"fieldtype": "Currency",
+			"options": "presentation_currency",
+			"width": 130,
+		}
+	]
 
-    # 2. Aging Bucket Columns (MODIFIED)
-    aging_columns = [
-        {
-            "label": _("0 - 90"), # MODIFIED: Previously "0 - 30"
-            "fieldname": "age_0_30",
-            "fieldtype": "Currency",
-            "options": "presentation_currency",
-            "width": 100,
-        },
-        {
-            "label": _("91 - 120"), # MODIFIED: Previously "31 - 60"
-            "fieldname": "age_31_60",
-            "fieldtype": "Currency",
-            "options": "presentation_currency",
-            "width": 100,
-        },
-        {
-            "label": _("121 - 180"), # MODIFIED: Previously "61 - 90"
-            "fieldname": "age_61_90",
-            "fieldtype": "Currency",
-            "options": "presentation_currency",
-            "width": 100,
-        },
-        {
-            "label": _("Over 180"), # MODIFIED: Previously "Over 90"
-            "fieldname": "age_over_90",
-            "fieldtype": "Currency",
-            "options": "presentation_currency",
-            "width": 100,
-        },
-    ]
-    
-    # 3. Append Aging Columns to the end
-    columns.extend(aging_columns)
-    
-    return columns
+	# 2. Aging Bucket Columns (MODIFIED)
+	aging_columns = [
+		{
+			"label": _("0 - 90"), # MODIFIED: Previously "0 - 30"
+			"fieldname": "age_0_30",
+			"fieldtype": "Currency",
+			"options": "presentation_currency",
+			"width": 100,
+		},
+		{
+			"label": _("91 - 120"), # MODIFIED: Previously "31 - 60"
+			"fieldname": "age_31_60",
+			"fieldtype": "Currency",
+			"options": "presentation_currency",
+			"width": 100,
+		},
+		{
+			"label": _("121 - 180"), # MODIFIED: Previously "61 - 90"
+			"fieldname": "age_61_90",
+			"fieldtype": "Currency",
+			"options": "presentation_currency",
+			"width": 100,
+		},
+		{
+			"label": _("Over 180"), # MODIFIED: Previously "Over 90"
+			"fieldname": "age_over_90",
+			"fieldtype": "Currency",
+			"options": "presentation_currency",
+			"width": 100,
+		},
+	]
+	
+	# 3. Append Aging Columns to the end
+	columns.extend(aging_columns)
+	
+	return columns
 
 # --- AGING LOGIC START: New functions for aging calculation and account type check ---
 
@@ -727,8 +735,8 @@ def is_receivable_account(account_name):
 def get_aged_ar_data(report_date):
 	"""
 	Calculates the outstanding aging buckets for all active Sales Invoices as of report_date.
-    
-    MODIFIED to use 0-90, 91-120, 121-180, and Over 180 days buckets.
+	
+	MODIFIED to use 0-90, 91-120, 121-180, and Over 180 days buckets.
 	"""
 	
 	invoices = frappe.db.sql("""
