@@ -87,21 +87,19 @@ def get_data_with_opening_closing(filters, account_details, gl_entries, aging_da
     data = []
     from_date = getdate(filters.from_date)
     
-    # Initialize separate dictionaries for Opening and Transaction Totals
-    # This ensures the bottom rows match image_690f4f.png exactly
+    # Initialize dictionaries for financial and aging totals
+    # Added aging fields to totals to solve your calculation problem
     totals = _dict({
-        "opening": {"debit": 0, "credit": 0},
-        "period": {"debit": 0, "credit": 0},
-        "closing": {"debit": 0, "credit": 0}
+        "opening": {"debit": 0, "credit": 0, "age_0_90": 0, "age_91_120": 0, "age_121_180": 0, "age_over_180": 0},
+        "period": {"debit": 0, "credit": 0, "age_0_90": 0, "age_91_120": 0, "age_121_180": 0, "age_over_180": 0},
+        "closing": {"debit": 0, "credit": 0, "age_0_90": 0, "age_91_120": 0, "age_121_180": 0, "age_over_180": 0}
     })
 
     entries = []
 
     for gle in gl_entries:
-        # Reset aging fields for each entry
         gle.update({"age_0_90": 0.0, "age_91_120": 0.0, "age_121_180": 0.0, "age_over_180": 0.0})
 
-        # Inject Aging only for Sales Invoices
         if gle.voucher_type == "Sales Invoice":
             age_info = aging_data.get(gle.voucher_no, {})
             gle.update({
@@ -111,64 +109,63 @@ def get_data_with_opening_closing(filters, account_details, gl_entries, aging_da
                 "age_over_180": age_info.get("b4", 0.0)
             })
 
-        # Calculate Running Totals based on date
+        # Logic for Opening vs Period entries
         if gle.posting_date < from_date or gle.is_opening == "Yes":
-            totals.opening["debit"] += gle.debit
-            totals.opening["credit"] += gle.credit
+            update_totals_dict(totals.opening, gle)
         else:
-            totals.period["debit"] += gle.debit
-            totals.period["credit"] += gle.credit
+            update_totals_dict(totals.period, gle)
             entries.append(gle)
 
-        # Closing is always the sum of everything
-        totals.closing["debit"] += gle.debit
-        totals.closing["credit"] += gle.credit
+        # Closing always accumulates everything
+        update_totals_dict(totals.closing, gle)
 
-    # 1. Build the 'Opening' Row (₹3,81,483.00 Balance)
-    data.append(_dict({
-        "account": TRANSLATIONS.OPENING,
-        "debit": totals.opening["debit"],
-        "credit": totals.opening["credit"],
-        "balance": totals.opening["debit"] - totals.opening["credit"]
-    }))
+    # 1. Build Opening Row
+    data.append(create_total_row(TRANSLATIONS.OPENING, totals.opening))
     
-    # 2. Add Transaction Entries
+    # 2. Add Entries
     data += entries
     
-    # 3. Add 'Total' Row (Period totals: ₹1,28,904.00 / ₹4,50,834.00)
-    data.append(_dict({
-        "account": TRANSLATIONS.TOTAL,
-        "debit": totals.period["debit"],
-        "credit": totals.period["credit"],
-        "balance": totals.period["debit"] - totals.period["credit"]
-    }))
+    # 3. Add Period Total Row
+    data.append(create_total_row(TRANSLATIONS.TOTAL, totals.period))
 
-    # 4. Add 'Closing' Row (Final Balance: ₹59,553.00)
-    data.append(_dict({
-        "account": TRANSLATIONS.CLOSING_TOTAL,
-        "debit": totals.closing["debit"],
-        "credit": totals.closing["credit"],
-        "balance": totals.closing["debit"] - totals.closing["credit"]
-    }))
+    # 4. Add Closing Row
+    data.append(create_total_row(TRANSLATIONS.CLOSING_TOTAL, totals.closing))
 
     return data
 
+def update_totals_dict(target, gle):
+    """Helper to update both financial and aging totals in summary rows."""
+    target["debit"] += gle.get("debit", 0)
+    target["credit"] += gle.get("credit", 0)
+    target["age_0_90"] += gle.get("age_0_90", 0)
+    target["age_91_120"] += gle.get("age_91_120", 0)
+    target["age_121_180"] += gle.get("age_121_180", 0)
+    target["age_over_180"] += gle.get("age_over_180", 0)
+
+def create_total_row(label, totals_dict):
+    """Helper to create the formatted summary row for the report."""
+    return _dict({
+        "account": label,
+        "debit": totals_dict["debit"],
+        "credit": totals_dict["credit"],
+        "balance": totals_dict["debit"] - totals_dict["credit"],
+        "age_0_90": totals_dict["age_0_90"],
+        "age_91_120": totals_dict["age_91_120"],
+        "age_121_180": totals_dict["age_121_180"],
+        "age_over_180": totals_dict["age_over_180"]
+    })
+
 def get_result_as_list(data):
-    """Refines the running balance calculation to match image_690c28.png."""
     running_balance = 0
     for i, d in enumerate(data):
-        # The Opening row defines the starting balance
         if i == 0:
             running_balance = d.get("debit", 0) - d.get("credit", 0)
             d["balance"] = running_balance
             continue
             
-        # Update running balance for entries
         if d.get("voucher_no") or d.get("posting_date"):
             running_balance += d.get("debit", 0) - d.get("credit", 0)
             d["balance"] = running_balance
-        
-        # Summary rows already have calculated balances from the logic above
     return data
 
 def get_columns(filters):
