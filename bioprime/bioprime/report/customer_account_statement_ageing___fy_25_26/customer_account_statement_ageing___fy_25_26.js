@@ -222,4 +222,4 @@ frappe.query_reports["Customer account statement ageing - FY 25-26"] = {
 			fieldtype: "Check",
 		},
 	],
-};
+};  
