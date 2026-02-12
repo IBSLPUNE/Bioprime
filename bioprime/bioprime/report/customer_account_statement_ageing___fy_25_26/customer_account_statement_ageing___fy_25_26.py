@@ -206,14 +206,17 @@ def get_data_with_opening_closing(filters, gl_entries, aging_data):
 
     return data
 
-
 def update_totals(target, gle):
-    target["debit"] += gle.debit
-    target["credit"] += gle.credit
-    target["age_0_90"] += gle.age_0_90
-    target["age_91_120"] += gle.age_91_120
-    target["age_121_180"] += gle.age_121_180
-    target["age_over_180"] += gle.age_over_180
+    target["debit"] += float(gle.debit or 0)
+    target["credit"] += float(gle.credit or 0)
+    
+    # IMPORTANT: Only add to aging totals if this is a row that has aging data
+    # This prevents the totals from inflating if there are non-invoice entries
+    if gle.get("age_over_180") or gle.get("age_0_90") or gle.get("age_91_120") or gle.get("age_121_180"):
+        target["age_0_90"] += float(gle.age_0_90 or 0)
+        target["age_91_120"] += float(gle.age_91_120 or 0)
+        target["age_121_180"] += float(gle.age_121_180 or 0)
+        target["age_over_180"] += float(gle.age_over_180 or 0)
 
 
 def create_total_row(label, totals):
@@ -230,13 +233,34 @@ def create_total_row(label, totals):
 
 
 def get_result_as_list(data):
-    balance = 0
-    for d in data:
-        if d.get("debit") is not None:
-            balance += d.debit - d.credit
-            d.balance = balance
-    return data
+    running_balance = 0.0
+    
+    for i, d in enumerate(data):
+        debit = float(d.get("debit") or 0)
+        credit = float(d.get("credit") or 0)
 
+        # 1. For the very first row (Opening), set the initial balance
+        if i == 0:
+            running_balance = debit - credit
+            d["balance"] = running_balance
+        
+        # 2. For Total rows (Row 7 in your screenshot), we show the Period Net Change
+        elif d.get("account") == TRANSLATIONS.TOTAL:
+            d["balance"] = debit - credit
+            # We do NOT update running_balance here to avoid double-counting
+            
+        # 3. For the Closing row, we show the final accumulated balance
+        elif d.get("account") == TRANSLATIONS.CLOSING_TOTAL:
+            d["balance"] = running_balance
+            
+        # 4. For standard transaction rows
+        else:
+            running_balance += (debit - credit)
+            d["balance"] = running_balance
+            
+    return data
+    
+    
 
 def get_columns(filters):
     return [
@@ -280,4 +304,3 @@ def get_aged_ar_data(report_date):
         }
 
     return aging
-
